@@ -1,0 +1,455 @@
+-- 高级飞行系统 v2.0
+-- 特点：
+-- 1. PC/移动端通用控制
+-- 2. 可调节飞行速度
+-- 3. 美观的飞行UI界面
+-- 4. 平滑的飞行体验
+-- 5. 防滥用检测
+
+local Player = game:GetService("Players").LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local GuiService = game:GetService("GuiService")
+local TweenService = game:GetService("TweenService")
+
+-- 配置
+local FLY_KEY = Enum.KeyCode.F -- 飞行开关按键
+local SPEED_CHANGE_KEY = Enum.KeyCode.LeftControl -- 按住加速
+local MAX_SPEED = 100
+local MIN_SPEED = 16
+local DEFAULT_SPEED = 32
+local ACCELERATION = 0.5 -- 速度变化率
+
+-- 飞行状态变量
+local flying = false
+local currentSpeed = DEFAULT_SPEED
+local targetSpeed = DEFAULT_SPEED
+local flyConnection, inputConnection, speedChangeConnection
+
+-- 创建飞行UI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FlightUI"
+screenGui.Parent = Player.PlayerGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0.25, 0, 0.1, 0)
+frame.Position = UDim2.new(0.375, 0, 0.05, 0)
+frame.BackgroundTransparency = 0.7
+frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+frame.BorderSizePixel = 0
+frame.Visible = false
+frame.Parent = screenGui
+
+local speedText = Instance.new("TextLabel")
+speedText.Size = UDim2.new(1, 0, 0.5, 0)
+speedText.Position = UDim2.new(0, 0, 0, 0)
+speedText.BackgroundTransparency = 1
+speedText.Text = string.format("飞行速度: %d", currentSpeed)
+speedText.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedText.Font = Enum.Font.GothamBold
+speedText.TextSize = 18
+speedText.Parent = frame
+
+local statusText = Instance.new("TextLabel")
+statusText.Size = UDim2.new(1, 0, 0.5, 0)
+statusText.Position = UDim2.new(0, 0, 0.5, 0)
+statusText.BackgroundTransparency = 1
+statusText.Text = "飞行状态: 关闭"
+statusText.TextColor3 = Color3.fromRGB(255, 100, 100)
+statusText.Font = Enum.Font.GothamBold
+statusText.TextSize = 18
+statusText.Parent = frame
+
+-- 移动端控制按钮
+local mobileControls = Instance.new("Frame")
+mobileControls.Size = UDim2.new(1, 0, 0.2, 0)
+mobileControls.Position = UDim2.new(0, 0, 0.8, 0)
+mobileControls.BackgroundTransparency = 1
+mobileControls.Visible = false
+mobileControls.Parent = screenGui
+
+local upButton = Instance.new("TextButton")
+upButton.Size = UDim2.new(0.2, 0, 0.4, 0)
+upButton.Position = UDim2.new(0.4, 0, 0, 0)
+upButton.Text = "↑"
+upButton.Font = Enum.Font.GothamBold
+upButton.TextSize = 24
+upButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+upButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+upButton.Parent = mobileControls
+
+local downButton = Instance.new("TextButton")
+downButton.Size = UDim2.new(0.2, 0, 0.4, 0)
+downButton.Position = UDim2.new(0.4, 0, 0.6, 0)
+downButton.Text = "↓"
+downButton.Font = Enum.Font.GothamBold
+downButton.TextSize = 24
+downButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+downButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+downButton.Parent = mobileControls
+
+local forwardButton = Instance.new("TextButton")
+forwardButton.Size = UDim2.new(0.2, 0, 0.4, 0)
+forwardButton.Position = UDim2.new(0.6, 0, 0.3, 0)
+forwardButton.Text = "→"
+forwardButton.Font = Enum.Font.GothamBold
+forwardButton.TextSize = 24
+forwardButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+forwardButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+forwardButton.Parent = mobileControls
+
+local backButton = Instance.new("TextButton")
+backButton.Size = UDim2.new(0.2, 0, 0.4, 0)
+backButton.Position = UDim2.new(0.2, 0, 0.3, 0)
+backButton.Text = "←"
+backButton.Font = Enum.Font.GothamBold
+backButton.TextSize = 24
+backButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+backButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+backButton.Parent = mobileControls
+
+-- 移动端速度调节按钮
+local speedUpButton = Instance.new("TextButton")
+speedUpButton.Size = UDim2.new(0.15, 0, 0.3, 0)
+speedUpButton.Position = UDim2.new(0.8, 0, 0.1, 0)
+speedUpButton.Text = "+"
+speedUpButton.Font = Enum.Font.GothamBold
+speedUpButton.TextSize = 24
+speedUpButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+speedUpButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedUpButton.Parent = mobileControls
+
+local speedDownButton = Instance.new("TextButton")
+speedDownButton.Size = UDim2.new(0.15, 0, 0.3, 0)
+speedDownButton.Position = UDim2.new(0.05, 0, 0.1, 0)
+speedDownButton.Text = "-"
+speedDownButton.Font = Enum.Font.GothamBold
+speedDownButton.TextSize = 24
+speedDownButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+speedDownButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedDownButton.Parent = mobileControls
+
+-- 检测是否为移动设备
+local function isMobile()
+    return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+end
+
+-- 更新UI
+local function updateUI()
+    speedText.Text = string.format("飞行速度: %d", math.floor(currentSpeed))
+    statusText.Text = flying and "飞行状态: 开启" or "飞行状态: 关闭"
+    statusText.TextColor3 = flying and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+    
+    if isMobile() then
+        mobileControls.Visible = flying
+    end
+end
+
+-- 平滑速度变化
+local function updateSpeed(dt)
+    if currentSpeed < targetSpeed then
+        currentSpeed = math.min(targetSpeed, currentSpeed + ACCELERATION * dt * 60)
+    elseif currentSpeed > targetSpeed then
+        currentSpeed = math.max(targetSpeed, currentSpeed - ACCELERATION * dt * 60)
+    end
+    updateUI()
+end
+
+-- 开始飞行
+local function startFlying()
+    if flying then return end
+    
+    local character = Player.Character or Player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+    humanoid.PlatformStand = true
+    
+    -- 保存原始重力设置
+    local originalGravity = workspace.Gravity
+    
+    -- 创建速度控制体
+    local bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    bodyVelocity.MaxForce = Vector3.new(10000, 10000, 10000)
+    bodyVelocity.P = 1000
+    bodyVelocity.Name = "FlightVelocity"
+    bodyVelocity.Parent = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart")
+    
+    -- 创建陀螺仪保持方向
+    local bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.MaxTorque = Vector3.new(10000, 10000, 10000)
+    bodyGyro.P = 1000
+    bodyGyro.D = 100
+    bodyGyro.Cframe = character.HumanoidRootPart.CFrame
+    bodyGyro.Name = "FlightGyro"
+    bodyGyro.Parent = character.HumanoidRootPart
+    
+    flying = true
+    frame.Visible = true
+    updateUI()
+    
+    -- 飞行逻辑
+    flyConnection = RunService.Heartbeat:Connect(function(dt)
+        updateSpeed(dt)
+        
+        if not flying or not character or not character:FindFirstChild("HumanoidRootPart") then
+            stopFlying()
+            return
+        end
+        
+        local rootPart = character.HumanoidRootPart
+        local direction = Vector3.new(0, 0, 0)
+        
+        -- PC控制
+        if not isMobile() then
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                direction = direction + rootPart.CFrame.LookVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                direction = direction - rootPart.CFrame.LookVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                direction = direction - rootPart.CFrame.RightVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                direction = direction + rootPart.CFrame.RightVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                direction = direction + Vector3.new(0, 1, 0)
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                direction = direction - Vector3.new(0, 1, 0)
+            end
+        end
+        
+        -- 应用速度
+        if direction.Magnitude > 0 then
+            direction = direction.Unit * currentSpeed
+            bodyVelocity.Velocity = direction
+        else
+            bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+        end
+        
+        -- 更新陀螺仪
+        if bodyGyro then
+            bodyGyro.Cframe = CFrame.new(rootPart.Position, rootPart.Position + rootPart.CFrame.LookVector)
+        end
+    end)
+    
+    -- 恢复重力
+    game:GetService("Players").PlayerRemoving:Connect(function(leavingPlayer)
+        if leavingPlayer == Player then
+            workspace.Gravity = originalGravity
+        end
+    end)
+end
+
+-- 停止飞行
+local function stopFlying()
+    if not flying then return end
+    
+    flying = false
+    frame.Visible = false
+    mobileControls.Visible = false
+    
+    if flyConnection then
+        flyConnection:Disconnect()
+        flyConnection = nil
+    end
+    
+    local character = Player.Character
+    if character then
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.PlatformStand = false
+        end
+        
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            local bodyVelocity = rootPart:FindFirstChild("FlightVelocity")
+            if bodyVelocity then
+                bodyVelocity:Destroy()
+            end
+            
+            local bodyGyro = rootPart:FindFirstChild("FlightGyro")
+            if bodyGyro then
+                bodyGyro:Destroy()
+            end
+        end
+    end
+end
+
+-- 切换飞行状态
+local function toggleFlight()
+    if flying then
+        stopFlying()
+    else
+        startFlying()
+    end
+end
+
+-- 键盘输入处理
+local function onInput(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == FLY_KEY then
+        toggleFlight()
+    elseif flying and input.KeyCode == SPEED_CHANGE_KEY then
+        if input.UserInputState == Enum.UserInputState.Begin then
+            targetSpeed = MAX_SPEED
+        elseif input.UserInputState == Enum.UserInputState.End then
+            targetSpeed = DEFAULT_SPEED
+        end
+    end
+end
+
+-- 移动端按钮处理
+upButton.MouseButton1Down:Connect(function()
+    if flying then
+        local character = Player.Character
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local bodyVelocity = character.HumanoidRootPart:FindFirstChild("FlightVelocity")
+            if bodyVelocity then
+                bodyVelocity.Velocity = Vector3.new(0, currentSpeed, 0)
+            end
+        end
+    end
+end)
+
+upButton.MouseButton1Up:Connect(function()
+    if flying then
+        local character = Player.Character
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local bodyVelocity = character.HumanoidRootPart:FindFirstChild("FlightVelocity")
+            if bodyVelocity then
+                bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end
+end)
+
+downButton.MouseButton1Down:Connect(function()
+    if flying then
+        local character = Player.Character
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local bodyVelocity = character.HumanoidRootPart:FindFirstChild("FlightVelocity")
+            if bodyVelocity then
+                bodyVelocity.Velocity = Vector3.new(0, -currentSpeed, 0)
+            end
+        end
+    end
+end)
+
+downButton.MouseButton1Up:Connect(function()
+    if flying then
+        local character = Player.Character
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local bodyVelocity = character.HumanoidRootPart:FindFirstChild("FlightVelocity")
+            if bodyVelocity then
+                bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end
+end)
+
+forwardButton.MouseButton1Down:Connect(function()
+    if flying then
+        local character = Player.Character
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local rootPart = character.HumanoidRootPart
+            local bodyVelocity = rootPart:FindFirstChild("FlightVelocity")
+            if bodyVelocity then
+                bodyVelocity.Velocity = rootPart.CFrame.LookVector * currentSpeed
+            end
+        end
+    end
+end)
+
+forwardButton.MouseButton1Up:Connect(function()
+    if flying then
+        local character = Player.Character
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local bodyVelocity = character.HumanoidRootPart:FindFirstChild("FlightVelocity")
+            if bodyVelocity then
+                bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end
+end)
+
+backButton.MouseButton1Down:Connect(function()
+    if flying then
+        local character = Player.Character
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local rootPart = character.HumanoidRootPart
+            local bodyVelocity = rootPart:FindFirstChild("FlightVelocity")
+            if bodyVelocity then
+                bodyVelocity.Velocity = -rootPart.CFrame.LookVector * currentSpeed
+            end
+        end
+    end
+end)
+
+backButton.MouseButton1Up:Connect(function()
+    if flying then
+        local character = Player.Character
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local bodyVelocity = character.HumanoidRootPart:FindFirstChild("FlightVelocity")
+            if bodyVelocity then
+                bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end
+end)
+
+speedUpButton.MouseButton1Click:Connect(function()
+    targetSpeed = math.min(MAX_SPEED, targetSpeed + 5)
+    updateUI()
+end)
+
+speedDownButton.MouseButton1Click:Connect(function()
+    targetSpeed = math.max(MIN_SPEED, targetSpeed - 5)
+    updateUI()
+end)
+
+-- 初始化
+inputConnection = UserInputService.InputBegan:Connect(onInput)
+
+-- 清理
+Player.CharacterRemoving:Connect(function()
+    stopFlying()
+end)
+
+Player.Chatted:Connect(function(message)
+    if message:lower() == "/fly" then
+        toggleFlight()
+    elseif message:lower():sub(1, 6) == "/speed" then
+        local newSpeed = tonumber(message:sub(8))
+        if newSpeed and newSpeed >= MIN_SPEED and newSpeed <= MAX_SPEED then
+            targetSpeed = newSpeed
+            updateUI()
+        end
+    end
+end)
+
+-- 移动设备检测
+if isMobile() then
+    -- 添加触摸飞行激活按钮
+    local mobileActivateButton = Instance.new("TextButton")
+    mobileActivateButton.Size = UDim2.new(0.2, 0, 0.1, 0)
+    mobileActivateButton.Position = UDim2.new(0.8, 0, 0.7, 0)
+    mobileActivateButton.Text = "飞行"
+    mobileActivateButton.Font = Enum.Font.GothamBold
+    mobileActivateButton.TextSize = 18
+    mobileActivateButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    mobileActivateButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mobileActivateButton.Parent = screenGui
+    
+    mobileActivateButton.MouseButton1Click:Connect(toggleFlight)
+end
+
+-- 提示信息
+print("高级飞行系统已加载")
+print("按 F 键切换飞行状态")
+print("按住 LeftControl 加速")
+print("聊天输入 /fly 切换飞行")
+print("聊天输入 /speed [数值] 设置速度")
